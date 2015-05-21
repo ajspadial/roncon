@@ -1,5 +1,74 @@
 <?php
 
+class Translations {
+	private $source_to_target;
+	private $target_to_source;
+
+	private $translations;
+	private $path_map;
+
+	public function __construct($translations, $path_map) {
+		$this->translations = $translations;
+		$this->path_map = $path_map;
+		$this->source_to_target['none'] = function($s) {return $s;};
+		$this->source_to_target['map'] = $this->build_map('source', 'target');
+		$this->target_to_source['none'] = $source_to_target['none'];
+		$this->target_to_source['map'] = $this->build_map('target', 'source');
+	}
+
+	private function build_map($key_field, $value_field) {
+		return function($s) {
+			foreach($this->path_map as $p) {
+				if ($p->$key_field === $s) {
+					return $p->$value_field;
+				}
+			}
+		};
+	}
+
+	public function encode($s, $index) {
+		$function = $this->translations[$index];
+		return $this->source_to_target[$function]($s);
+	}
+
+	public function decode($s, $index) {
+		$function = $this->translations[$index];
+		return $this->target_to_source[$function]($s);
+	}
+}
+
+class Source {
+	private $blobs;
+	private $read_mask;
+	private $write_mask;
+
+	public function __construct($mask) {
+		$this->read_mask = $mask[0];
+		$this->write_mask = $mask[1];
+	}
+
+	public function read_blobs($request_uri) {
+		preg_replace_callback($this->read_mask,
+			function($blobs) {
+				$this->blobs = [];
+				for ($i = 1; $i < count($blobs); $i++) {
+					$this->blobs[] = $blobs[$i];
+				}
+				return $blobs[0];
+			},
+		$request_uri);
+		return $this->blobs;
+	}
+
+	public function create_instance($blobs) {
+		$aux = $this->write_mask;
+		for ($i = 0; $i < count($blobs); $i++) {
+			$aux = str_replace("$" . $i++, $blobs[--$i], $aux);
+		}
+		return $aux;
+	}
+}
+
 function strcat($a, $b) {
 	return $a . $b;
 }
@@ -54,12 +123,17 @@ function decode_path($encoded_path) {
 	return date('Y/m/d', $aux);
 }
 
+$config = json_decode(file_get_contents('config.json'));
 $requestURI = $_SERVER['REQUEST_URI'];
+$uri = 'article/2015/05/20/1/writing-a-shortener';
+$target = new Source($config->target_mask);
+//$target = new Source(['/(article)\/([0-9]{4}\/[0-9]{2}\/[0-9]{2}\/[1-9]+)/', '']);
 $t = mktime(0, 0, 0, 5, 19, 2015);
 $requestURI = 't/' . num_to_sxg($t, 20) . '/1/';
 print($requestURI . "\n");
 
-$config = json_decode(file_get_contents('config.json'));
+$source = new Source($config->source_mask);
+$translator = new Translations($config->translations, $config->path);
 
 $request_blobs = explode('/', $requestURI);
 
